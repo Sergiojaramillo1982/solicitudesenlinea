@@ -38,6 +38,18 @@ body{ font-family:Inter, ui-sans-serif, system-ui; background:var(--bg); color:#
 .sig-canvas{ width:100%; height:140px; display:block; background:#fff; border-radius:10px; cursor:crosshair; touch-action:none; }
 .center{ display:flex; align-items:center; justify-content:center; }
 @media (max-width:480px){ .row{ grid-template-columns:1fr; } .shell{ max-width:100%; } .phone{ border-radius:0; } }
+
+/* --- Loading state botones (NUEVO) --- */
+.btn-loading{ opacity:.75; pointer-events:none; }
+.spinner{
+  width:18px;height:18px;
+  border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;
+  border-radius:999px;
+  animation:spin .8s linear infinite;
+  margin-right:10px;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -53,13 +65,11 @@ body{ font-family:Inter, ui-sans-serif, system-ui; background:var(--bg); color:#
 
 
 
-
 <!-- Paso 1 -->
 <div id="screen1" class="screen active">
   <header class="header">
     <div class="header-inner">
       <div class="flex items-center justify-between">
-        
         <div class="text-sm opacity-90">Paso 1 de 3</div>
       </div>
       <h1 class="text-2xl font-semibold mt-4">Datos del colaborador</h1>
@@ -135,8 +145,8 @@ body{ font-family:Inter, ui-sans-serif, system-ui; background:var(--bg); color:#
             <option>Colsubsidio - información subsidio de vivienda</option>
             <option>Colsubsidio - Subsidio familiar</option>
             <option>Colsubsidio - tarjeta multiservicios</option>
-	    <option>Colsubsidio - Fondo de Empleados, información general</option>
-	    <option>Colsubsidio - Fondo de Empleados, afiliación</option>
+            <option>Colsubsidio - Fondo de Empleados, información general</option>
+            <option>Colsubsidio - Fondo de Empleados, afiliación</option>
             <option>Davivienda - información afiliación dafuturo</option>
             <option>Davivienda - información créditos de libranza</option>
             <option>Davivienda - información retiros dafuturo</option>
@@ -277,6 +287,22 @@ const $ = (id) => document.getElementById(id);
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
 function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active")); $(id).classList.add("active"); window.scrollTo({top:0, behavior:"instant"}); }
 
+// ======== Anti doble clic + Loading UI (NUEVO) ========
+const busy = { buscar:false, paso2:false, guardar:false };
+function setBtnLoading(btn, isLoading, textLoading="Procesando..."){
+  if(!btn) return;
+  if(isLoading){
+    btn.dataset._oldText = btn.innerHTML;
+    btn.classList.add("btn-loading");
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span>${textLoading}`;
+  } else {
+    btn.classList.remove("btn-loading");
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset._oldText || btn.innerHTML;
+  }
+}
+
 // ======== Acordeones ========
 function wireAcc(){
   document.querySelectorAll("#screen2 .acc-header").forEach(h=>{
@@ -303,9 +329,20 @@ function isEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s); }
 
 // ======== Paso 1: búsqueda por cédula ========
 async function buscar(){
+  if(busy.buscar) return;              // NUEVO
+  busy.buscar = true;
+
+  const btn = $("btnBuscar");          // NUEVO
+  setBtnLoading(btn, true, "Buscando...");
+
   $("errPaso1").textContent="";
   const ced = $("cedula").value.trim();
-  if(!ced){ toast("Ingresa una cédula"); return; }
+  if(!ced){
+    setBtnLoading(btn, false);
+    busy.buscar = false;
+    toast("Ingresa una cédula");
+    return;
+  }
   try{
     let url = `${SHEETDB_URL}/search?sheet=${encodeURIComponent(SHEET_NAME)}&cedula=${encodeURIComponent(ced)}`;
     let res = await fetch(url, {cache:"no-store"});
@@ -327,6 +364,10 @@ async function buscar(){
     $("btnIrPaso2").disabled = false;
     toast("Datos cargados");
   }catch(e){ console.error(e); $("errPaso1").textContent="Error leyendo SheetDB: "+e.message; }
+  finally{
+    setBtnLoading(btn, false);
+    busy.buscar = false;
+  }
 }
 $("btnBuscar").addEventListener("click", buscar);
 $("cedula").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); buscar(); } });
@@ -338,33 +379,33 @@ async function cargarJefes(){
     const res = await fetch(url, {cache:"no-store"});
     if(!res.ok) throw new Error("SheetDB jefes "+res.status);
     const data = await res.json();
-    const jefes = (data || []).map(r=>({ 
-      nombre:(r.jefe_nombre||r.JEFE_NOMBRE||"").toString().trim(), 
+    const jefes = (data || []).map(r=>({
+      nombre:(r.jefe_nombre||r.JEFE_NOMBRE||"").toString().trim(),
       correo:normEmail((r.jefe_correo||r.JEFE_CORREO||"").toString())
     })).filter(x=>x.nombre && isEmail(x.correo));
 
-    const fill=(id)=>{ 
-      const sel=$(id); 
-      sel.innerHTML="<option value=''>— Selecciona —</option>"; 
-      jefes.forEach(j=>{ 
-        const o=document.createElement("option"); 
-        o.value=j.correo; 
-        o.textContent=j.nombre; 
-        o.dataset.nombre=j.nombre; 
-        sel.appendChild(o); 
-      }); 
+    const fill=(id)=>{
+      const sel=$(id);
+      sel.innerHTML="<option value=''>— Selecciona —</option>";
+      jefes.forEach(j=>{
+        const o=document.createElement("option");
+        o.value=j.correo;
+        o.textContent=j.nombre;
+        o.dataset.nombre=j.nombre;
+        sel.appendChild(o);
+      });
       sel.disabled = jefes.length===0;
     };
-    fill("vacJefeSelect"); 
+    fill("vacJefeSelect");
     fill("permJefeSelect");
 
-    const link=(selId,mailId)=>{ 
-      const sel=$(selId), mail=$(mailId); 
+    const link=(selId,mailId)=>{
+      const sel=$(selId), mail=$(mailId);
       const h=()=> { mail.value = normEmail(sel.value); };
-      sel.addEventListener("change",h); 
-      sel.addEventListener("input",h); 
+      sel.addEventListener("change",h);
+      sel.addEventListener("input",h);
     };
-    link("vacJefeSelect","vacJefeCorreo"); 
+    link("vacJefeSelect","vacJefeCorreo");
     link("permJefeSelect","permJefeCorreo");
   }catch(e){ console.error(e); $("errMsg").textContent="Error cargando jefes: "+e.message; }
 }
@@ -403,11 +444,25 @@ document.querySelectorAll("[data-clear]").forEach(b=> b.addEventListener("click"
 
 // ======== Paso 1 → 2 ========
 $("btnIrPaso2").addEventListener("click", async()=>{
+  if(busy.paso2) return;               // NUEVO
   if(!$("nombreCompleto").value){ toast("Busca una cédula válida primero"); return; }
-  show("screen2");
-  wireAcc();
-  await cargarJefes();
-  Object.values(signatures).forEach(s => s.resize());
+
+  busy.paso2 = true;                   // NUEVO
+  const btn = $("btnIrPaso2");         // NUEVO
+  setBtnLoading(btn, true, "Cargando...");
+
+  try{
+    show("screen2");
+    wireAcc();
+    await cargarJefes();
+    Object.values(signatures).forEach(s => s.resize());
+  }catch(e){
+    console.error(e);
+    toast("Error cargando información");
+  }finally{
+    setBtnLoading(btn, false);
+    busy.paso2 = false;
+  }
 });
 $("btnBack").addEventListener("click", ()=> show("screen1"));
 
@@ -415,104 +470,114 @@ $("btnBack").addEventListener("click", ()=> show("screen1"));
 function makeFolio(){ const d=new Date(); const pad=n=>String(n).padStart(2,"0"); return `SOL-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${Math.floor(Math.random()*1000).toString().padStart(3,"0")}`; }
 
 async function guardar(){
-  $("errMsg").textContent="";
-  const opened = document.querySelector("#screen2 .acc.open");
-  if(!opened){ toast("Abre una sección y completa los campos"); return; }
-  const email = normEmail($("emailSolicitante").value);
-  if(!isEmail(email)){ toast("Ingresa un correo válido"); return; }
-
-  const folio = makeFolio();
-  const base = {
-    folio, fecha_envio: new Date().toISOString(), solicitante_email: email,
-    cedula:$("cedula").value.trim(), nombre:$("nombreCompleto").value.trim(),
-    cargo:$("cargo").value.trim(), area:$("area").value.trim(),
-    categoria:"", tipo:"", detalle:"",
-    vac_desde:"", vac_hasta:"", vac_salida:"", vac_dias:"", vac_jefe_nombre:"", vac_jefe_correo:"",
-    perm_dia:"", perm_salida:"", perm_llegada:"", perm_jefe_nombre:"", perm_jefe_correo:"",
-    firma_base64:"", estado:"Pendiente"
-  };
+  if(busy.guardar) return;             // NUEVO
+  busy.guardar = true;                 // NUEVO
+  const btn = $("btnGuardar");         // NUEVO
+  setBtnLoading(btn, true, "Guardando...");
 
   try{
-    if(opened.id==="acc-generales"){ 
-      base.categoria="Generales"; 
-      base.tipo=$("genTipo").value||""; 
-      base.detalle=($("genDetalle").value||"").trim(); 
-      if(!base.tipo||!base.detalle) throw new Error("Completa tipo y detalle en Generales"); 
-    }
-    if(opened.id==="acc-vacaciones"){ 
-      base.categoria="Vacaciones"; 
-      base.vac_desde=$("vacDesde").value||""; 
-      base.vac_hasta=$("vacHasta").value||""; 
-      base.vac_salida=$("vacSalida").value||""; 
-      base.vac_dias=$("vacDias").value||""; 
-      const sel=$("vacJefeSelect"); 
-      const opt=sel.options[sel.selectedIndex]; 
-      const correo=normEmail(sel.value);
-      if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Vacaciones)"); 
-      base.vac_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim(); 
-      base.vac_jefe_correo=correo; 
-      base.firma_base64=signatures.sigVac.getPNG(); 
-      if(!(base.vac_desde&&base.vac_hasta&&base.vac_salida&&base.vac_dias)) throw new Error("Completa todos los campos de Vacaciones"); 
-    }
-    if(opened.id==="acc-permisos"){ 
-      base.categoria="Permisos"; 
-      base.perm_dia=$("permDia").value||""; 
-      base.perm_salida=$("permSalida").value||""; 
-      base.perm_llegada=$("permLlegada").value||""; 
-      base.detalle=($("permDetalle").value||"").trim(); 
-     
-if(opened.id==="acc-permisos"){ 
-  base.categoria="Permisos"; 
-  base.perm_dia=$("permDia").value||""; 
-  base.perm_salida=$("permSalida").value||""; 
-  base.perm_llegada=$("permLlegada").value||""; 
-  base.detalle=($("permDetalle").value||"").trim(); 
+    $("errMsg").textContent="";
+    const opened = document.querySelector("#screen2 .acc.open");
+    if(!opened){ toast("Abre una sección y completa los campos"); return; }
+    const email = normEmail($("emailSolicitante").value);
+    if(!isEmail(email)){ toast("Ingresa un correo válido"); return; }
 
-  // ✅ NUEVO: obligatorio detalle
-  if(!base.detalle) throw new Error("Registra el detalle del permiso (obligatorio)");
+    const folio = makeFolio();
+    const base = {
+      folio, fecha_envio: new Date().toISOString(), solicitante_email: email,
+      cedula:$("cedula").value.trim(), nombre:$("nombreCompleto").value.trim(),
+      cargo:$("cargo").value.trim(), area:$("area").value.trim(),
+      categoria:"", tipo:"", detalle:"",
+      vac_desde:"", vac_hasta:"", vac_salida:"", vac_dias:"", vac_jefe_nombre:"", vac_jefe_correo:"",
+      perm_dia:"", perm_salida:"", perm_llegada:"", perm_jefe_nombre:"", perm_jefe_correo:"",
+      firma_base64:"", estado:"Pendiente"
+    };
 
-  const sel=$("permJefeSelect"); 
-  const opt=sel.options[sel.selectedIndex]; 
-  const correo=normEmail(sel.value);
-  if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Permisos)"); 
-  base.perm_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim(); 
-  base.perm_jefe_correo=correo; 
-  base.firma_base64=signatures.sigPerm.getPNG(); 
-  if(!(base.perm_dia&&base.perm_salida&&base.perm_llegada)) throw new Error("Completa día y horarios del permiso"); 
-}
+    try{
+      if(opened.id==="acc-generales"){
+        base.categoria="Generales";
+        base.tipo=$("genTipo").value||"";
+        base.detalle=($("genDetalle").value||"").trim();
+        if(!base.tipo||!base.detalle) throw new Error("Completa tipo y detalle en Generales");
+      }
+      if(opened.id==="acc-vacaciones"){
+        base.categoria="Vacaciones";
+        base.vac_desde=$("vacDesde").value||"";
+        base.vac_hasta=$("vacHasta").value||"";
+        base.vac_salida=$("vacSalida").value||"";
+        base.vac_dias=$("vacDias").value||"";
+        const sel=$("vacJefeSelect");
+        const opt=sel.options[sel.selectedIndex];
+        const correo=normEmail(sel.value);
+        if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Vacaciones)");
+        base.vac_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim();
+        base.vac_jefe_correo=correo;
+        base.firma_base64=signatures.sigVac.getPNG();
+        if(!(base.vac_desde&&base.vac_hasta&&base.vac_salida&&base.vac_dias)) throw new Error("Completa todos los campos de Vacaciones");
+      }
+      if(opened.id==="acc-permisos"){
+        base.categoria="Permisos";
+        base.perm_dia=$("permDia").value||"";
+        base.perm_salida=$("permSalida").value||"";
+        base.perm_llegada=$("permLlegada").value||"";
+        base.detalle=($("permDetalle").value||"").trim();
 
+        if(opened.id==="acc-permisos"){
+          base.categoria="Permisos";
+          base.perm_dia=$("permDia").value||"";
+          base.perm_salida=$("permSalida").value||"";
+          base.perm_llegada=$("permLlegada").value||"";
+          base.detalle=($("permDetalle").value||"").trim();
 
- const sel=$("permJefeSelect"); 
-      const opt=sel.options[sel.selectedIndex]; 
-      const correo=normEmail(sel.value);
-      if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Permisos)"); 
-      base.perm_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim(); 
-      base.perm_jefe_correo=correo; 
-      base.firma_base64=signatures.sigPerm.getPNG(); 
-      if(!(base.perm_dia&&base.perm_salida&&base.perm_llegada)) throw new Error("Completa día y horarios del permiso"); 
-    }
-  }catch(e){ $("errMsg").textContent=e.message; return; }
+          // ✅ NUEVO: obligatorio detalle
+          if(!base.detalle) throw new Error("Registra el detalle del permiso (obligatorio)");
 
-  try{
-    // 1) Guardar en Hoja 2
-    const url = `${SHEETDB_URL}?sheet=${encodeURIComponent(SHEET_SAVE)}`;
-    const resp = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ data:[base] }) });
-    const text = await resp.text();
-    console.log("SheetDB POST", resp.status, text);
-    if(!resp.ok) throw new Error("SheetDB POST "+resp.status+" → "+text.slice(0,200));
+          const sel=$("permJefeSelect");
+          const opt=sel.options[sel.selectedIndex];
+          const correo=normEmail(sel.value);
+          if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Permisos)");
+          base.perm_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim();
+          base.perm_jefe_correo=correo;
+          base.firma_base64=signatures.sigPerm.getPNG();
+          if(!(base.perm_dia&&base.perm_salida&&base.perm_llegada)) throw new Error("Completa día y horarios del permiso");
+        }
 
-    $("folioMsg").innerHTML = "Folio generado: <b>"+folio+"</b>";
-    $("folioShow").textContent = folio;
-    toast("Solicitud guardada");
+        const sel=$("permJefeSelect");
+        const opt=sel.options[sel.selectedIndex];
+        const correo=normEmail(sel.value);
+        if(!opt||!isEmail(correo)) throw new Error("Selecciona el jefe inmediato (Permisos)");
+        base.perm_jefe_nombre=(opt.dataset.nombre||opt.textContent||"").trim();
+        base.perm_jefe_correo=correo;
+        base.firma_base64=signatures.sigPerm.getPNG();
+        if(!(base.perm_dia&&base.perm_salida&&base.perm_llegada)) throw new Error("Completa día y horarios del permiso");
+      }
+    }catch(e){ $("errMsg").textContent=e.message; return; }
 
-    // 2) NOTIFY sin CORS: beacon <img>
-    const beacon = $("notifyBeacon");
-    beacon.src = WEBAPP_URL + "?action=notify&folio=" + encodeURIComponent(folio) + "&ts=" + Date.now();
+    try{
+      // 1) Guardar en Hoja 2
+      const url = `${SHEETDB_URL}?sheet=${encodeURIComponent(SHEET_SAVE)}`;
+      const resp = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ data:[base] }) });
+      const text = await resp.text();
+      console.log("SheetDB POST", resp.status, text);
+      if(!resp.ok) throw new Error("SheetDB POST "+resp.status+" → "+text.slice(0,200));
 
-    // 3) Ir a paso 3 (Gracias)
-    setTimeout(()=> show("screen3"), 400);
+      $("folioMsg").innerHTML = "Folio generado: <b>"+folio+"</b>";
+      $("folioShow").textContent = folio;
+      toast("Solicitud guardada");
 
-  }catch(e){ console.error(e); $("errMsg").textContent = e.message; }
+      // 2) NOTIFY sin CORS: beacon <img>
+      const beacon = $("notifyBeacon");
+      beacon.src = WEBAPP_URL + "?action=notify&folio=" + encodeURIComponent(folio) + "&ts=" + Date.now();
+
+      // 3) Ir a paso 3 (Gracias)
+      setTimeout(()=> show("screen3"), 400);
+
+    }catch(e){ console.error(e); $("errMsg").textContent = e.message; }
+
+  }finally{
+    setBtnLoading(btn, false);          // NUEVO
+    busy.guardar = false;               // NUEVO
+  }
 }
 $("btnGuardar").addEventListener("click", guardar);
 
